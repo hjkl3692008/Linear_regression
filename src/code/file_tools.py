@@ -35,9 +35,9 @@ def save_csv(data, path):
 def load_house(trans=True, is_drop=True):
     p_data = load_csv(join_path(basic_path, 'kc_house_data.csv'))
     if is_drop:
-        p_data.drop(['id', 'date', 'zipcode', 'lat'], axis=1)
+        p_data = p_data.drop(['id', 'date', 'zipcode', 'lat'], axis=1)
     if trans:
-        p_data = np.array(p_data)
+        p_data = df2np(p_data)
     return p_data
 
 
@@ -49,5 +49,11 @@ def is_exist(t, name):
 
 
 # dataFrame to array
-def df2np(data):
+def df2ar(data):
     return data.values
+
+
+# dataframe to nparray
+def df2np(p_data):
+    p_data = np.array(p_data)
+    return p_data

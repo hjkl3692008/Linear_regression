@@ -2,75 +2,23 @@ import operator
 import random
 import time
 
-from scipy.spatial import distance
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import concurrent.futures
 
 import file_tools as ft
-import time_tools as tt
 
 
-# split train data and test data
-def split_train_test(d, percentage=0.9):
-    # num of total data
-    shape = d.shape
-    num = shape[0]
-
-    # shuffle index
-    index = np.arange(num)
-    random.shuffle(index)
-
-    # calculate train's num and test's num
-    train_num = int(num * percentage)
-    test_num = num - train_num
-
-    # get train's index and test's index
-    train_index = index[0:train_num]
-    test_index = index[train_num:num]
-
-    # split data
-    train_data = d[train_index]
-    test_data = d[test_index]
-
-    return train_data, test_data, train_index, test_index
+# delete sqft_living >8000
+def delete_abnormal(df):
+    df = df[df['sqft_living'] < 8000]
+    return df
 
 
-class Tdtd:
-    test_data = None
-    train_data = None
-
-    def __init__(self, test_data, train_data):
-        self.test_data = test_data
-        self.train_data = train_data
-
-
-# split train data and test data by fold
-def split_by_fold(d, fold):
-    num = d.shape[0]
-    index = np.arange(num)
-    random.shuffle(index)
-
-    d_list = {}
-    for i in range(fold):
-        i_range = range(0 + i, num, fold)
-        train_data = d[index[i_range]]
-        d_list[i] = train_data
-
-    tdtd_list = []
-    for k1, v1 in d_list.items():
-        ov = np.array([])
-        for k2, v2 in d_list.items():
-            if k2 != k1:
-                if ov.size == 0:
-                    ov = v2
-                else:
-                    ov = np.concatenate((ov, v2))
-        t = Tdtd(v1, ov)
-        tdtd_list.append(t)
-
-    return tdtd_list
+# only contain price and sqft_living
+def contain_price_sq(df):
+    df = df[['price', 'sqft_living']]
+    return df
 
 
 # plot basic line
@@ -97,110 +45,101 @@ def heat_map(data, title='heat map table'):
     plt.show()
 
 
-# minkowski distance
-def minkowski(a, b, dim=2):
-    return distance.minkowski(a, b, dim)
+# plot scatter points and the linear regression line
+def plot_scatter_points(df, w):
+    # scatter points
+    plt.scatter(df[:, 1], df[:, 0], alpha=0.6)
+
+    # regression line
+    axes = plt.gca()
+    x = np.array(axes.get_xlim())
+    y = w[1] + w[0] * x
+    plt.plot(x, y, '--')
+
+    plt.show()
 
 
-# false positive, false negative, true positive, true negative
-def fpntpn(d, c=None):
-    fp = 0
-    fn = 0
-    tp = 0
-    tn = 0
-    index = d.shape[1] - 1
-    if c is not None:
-        d = d[np.where(d[:, index - 1] == c)]
-    for i in d:
-        if i[index - 1] == 1:
-            if i[index] == i[index - 1]:
-                tp = tp + 1
-            else:
-                fn = fn + 1
-        if i[index - 1] == 0:
-            if i[index] == i[index - 1]:
-                tn = tn + 1
-            else:
-                fp = fp + 1
-    return fp, fn, tp, tn
+# linear regression
+def linear_regression(df, iteration=5000, learn_rate=0.000001):
+    assert df.shape[1] == 2
+
+    y = df[:, 0]
+    x = df[:, 1]
+    # add constant dimension
+    x = np.vstack((x, np.ones(x.shape)))
+
+    w = gradient_descent(y, x, learn_rate, iteration)
+
+    return w
 
 
-# sensitivity & specificity & accuracy
-def ssa(fp, fn, tp, tn):
-    sen = tp / (tp + fn)
-    spec = tn / (tn + fp)
-    accuracy = (tp + tn) / (tp + fn + tn + fp)
-    return sen, spec, accuracy
+# least square method
+def gradient_descent(y, x, learn_rate, iteration, is_decay=True, w=np.array([0, 0])):
+
+    for i in range(1, iteration):
+        # loss = square_loss(y, x, w)
+        dw = square_loss_derivative(y, x, w)
+        lr = learn_rate
+        if is_decay:
+            lr = learn_decay(decay_type=EXPONENTIAL_DECAY, learn_rate=learn_rate, iteration=i)
+        w = w - lr * dw
+
+    return w
 
 
-# normalizing functions start ###############
+# square loss
+def square_loss(y, x, w):
+    loss = np.sum(np.power(np.dot(w.T, x) - y, 2))
+    return loss
 
-# todo:// unified entrance
-def normalizing(n_type):
-    0
+
+# least square derivative
+def square_loss_derivative(y, x, w):
+    dw = np.dot((np.dot(w.T, x) - y), x.T) / x.shape[1]
+    return dw
+
+# decay learn rate start ###############
 
 
-# (feature - min)/(max - min)
-def mm_normalization(d, contain_label=False):
-    assert type(d) == np.ndarray
-    n_d = np.array([])
-    for i in range(d.shape[1]):
-        feature = d[:, i]
-        max_f = np.max(feature)
-        min_f = np.min(feature)
+STEP_DECAY = 'STEP_DECAY'
+EXPONENTIAL_DECAY = 'EXPONENTIAL_DECAY'
+FRACTION_DECAY = 'FRACTION_DECAY'
 
-        n_dc = None
-        if contain_label & (i == d.shape[1] - 1):
-            n_dc = d[:, i]
-        elif max_f == min_f:
-            n_dc = d[:, i] / 255  # todo:// 255 not a good choice
+
+def learn_decay(decay_type, learn_rate, iteration, par=None):
+    lr = None
+    if decay_type == STEP_DECAY:
+        if par is None:
+            lr = step_decay(learn_rate, iteration)
         else:
-            n_dc = (feature - min_f)/(max_f - min_f)
-
-        if i == 0:
-            n_d = n_dc
+            lr = step_decay(learn_rate, iteration, n=par)
+    elif decay_type == EXPONENTIAL_DECAY:
+        if par is None:
+            lr = exponential_decay(learn_rate, iteration)
         else:
-            n_d = np.vstack((n_d, n_dc))
-
-    return n_d.T
-
-
-# (x-μ)/σ
-def z_score(d, contain_label=False):
-    assert type(d) == np.ndarray
-    n_d = np.array([])
-    for i in range(d.shape[1]):
-        feature = d[:, i]
-        mu = np.average(feature)
-        std = np.std(feature)
-
-        n_dc = None
-        if contain_label & (i == d.shape[1] - 1):
-            n_dc = d[:, i]
-        elif std == 0:
-            n_dc = np.zeros(d[:, i].shape)
+            lr = exponential_decay(learn_rate, iteration, base=par)
+    elif decay_type == FRACTION_DECAY:
+        if par is None:
+            lr = fraction_decay(learn_rate, iteration)
         else:
-            n_dc = (feature - mu)/std
+            lr = fraction_decay(learn_rate, iteration, rate=par)
 
-        if i == 0:
-            n_d = n_dc
-        else:
-            n_d = np.vstack((n_d, n_dc))
-
-    return n_d.T
+    return lr
 
 
-# 1/(1+sigmoid)
-def sigmoid(d, contain_label=False):
-    assert type(d) == np.ndarray
-    n_d = np.array([])
-    for i in range(d.shape[1]):
-        if i == 0:
-            n_d = 1.0 / (1 + np.exp(-d[:, i]))
-        elif contain_label & (i == d.shape[1]-1):
-            n_d = np.vstack((n_d, d[:, i]))
-        else:
-            norm = 1.0 / (1 + np.exp(-d[:, i]))
-            n_d = np.vstack((n_d, norm))
-    return n_d.T
-# normalizing functions end ###############
+def step_decay(learn_rate, iteration, n=100):
+    times = int(iteration/n)
+    lr = learn_rate * np.power(0.5, times)
+    return lr
+
+
+def exponential_decay(learn_rate, iteration, base=0.95):
+    lr = learn_rate * np.power(base, iteration)
+    return lr
+
+
+def fraction_decay(learn_rate, iteration, rate=0.5):
+    lr = learn_rate / (1 + rate*iteration)
+    return lr
+
+# decay learn rate end ###############
